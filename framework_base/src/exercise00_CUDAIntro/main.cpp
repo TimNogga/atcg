@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 
 #include <cuda_runtime.h>
 
@@ -33,12 +34,9 @@ void taskA()
     glm::vec3 plane_point_2 = glm::vec3(4, 3, 2);
     glm::vec3 plane_point_3 = glm::vec3(1, 2, 4);
 
-   
-    glm::vec3 plane_normal = glm::normalize(glm::cross(plane_point_3 - plane_point_1, plane_point_2 - plane_point_1));
+    // TODO implement
+    glm::vec3 plane_normal = glm::normalize(glm::cross(plane_point_2 - plane_point_1, plane_point_3 - plane_point_1));
     float     plane_d = -glm::dot(plane_normal, plane_point_1);
-
-
-
 
     //
 
@@ -54,20 +52,18 @@ void taskA()
     float3 ray_origin_cudafloat3 = make_float3(1, 4, 2);
     float3 ray_dir_cudafloat3 = make_float3(2, 4, 3);
 
-
     float3 intersection_cudafloat3;
-
     // TOOD:
     // - convert ray parameters to GLM vectors using cuda2glm() function.
-    glm::vec3 ray_origin = cuda2glm(ray_origin_cudafloat3);
-    glm::vec3 ray_dir = cuda2glm(ray_dir_cudafloat3);
-    
-
     // - implement ray-plane intersection.
     // - convert intersection point back to float3 type using glm2cuda() function.
-    float t = -(glm::dot(plane_normal, ray_origin) + plane_d)/glm::dot(plane_normal, ray_dir);
-    intersection_cudafloat3 = glm2cuda(ray_origin + t * ray_dir);
+    glm::vec3 ray_origin = cuda2glm(ray_origin_cudafloat3);
+    glm::vec3 ray_dir = cuda2glm(ray_dir_cudafloat3);
 
+    float t = -(plane_d + glm::dot(plane_normal, ray_origin)) / glm::dot(plane_normal, ray_dir);
+    glm::vec3 intersection = ray_origin + t * ray_dir;
+
+    intersection_cudafloat3 = glm2cuda(intersection);
     //
 
     std::cout << "\tray-plane intersection at (" << intersection_cudafloat3.x << " " << intersection_cudafloat3.y << " " << intersection_cudafloat3.z << ")" << std::endl;
@@ -82,40 +78,42 @@ void taskB()
      */
 
     // Use dataArray as your host memory
-    int N = 10000000;
-   
-    int constant = 42;
-
-    
+    std::vector<int> dataArray;
 
     // Use d_dataArray as a pointer to device memory
     int *d_dataArray;
-    cudaMallocManaged(&d_dataArray, N * sizeof(int));
-    for (int i = 0; i < N; ++i)
-    {
-        d_dataArray[i] = i + 1;
-    }
-    multiplyByConstant(d_dataArray, constant, N);
-    cudaDeviceSynchronize();
 
+    int n = 1e7;
+    dataArray.resize(n);
 
+    std::iota(dataArray.begin(), dataArray.end(), 1);
+
+    cudaMallocManaged(&d_dataArray, n * sizeof(int));
+
+    std::memcpy(d_dataArray, dataArray.data(), n * sizeof(int));
+
+    cudaMemPrefetchAsync(d_dataArray, n*sizeof(int), 0, 0);
+    runMultiply(n, d_dataArray, 7);
+
+    std::memcpy(dataArray.data(), d_dataArray, n * sizeof(int));
+
+    cudaFree(d_dataArray);
 
     //
 
     std::cout << "taskB output:" << std::endl;
     std::cout << "\tfirst 10 entries:";
-    for (int i = 0; i < std::min<int>(N, 10); ++i)
+    for (int i = 0; i < std::min<int>(dataArray.size(), 10); ++i)
     {
-        std::cout << " " << d_dataArray[i];
+        std::cout << " " << dataArray[i];
     }
     std::cout << std::endl;
     std::cout << "\tlast 10 entries:";
-    for (int i = std::max<int>(N-10, 0); i < N; ++i)
+    for (int i = std::max<int>(dataArray.size()-10, 0); i < dataArray.size(); ++i)
     {
-        std::cout << " " << d_dataArray[i];
+        std::cout << " " << dataArray[i];
     }
     std::cout << std::endl;
-    cudaFree(d_dataArray);
 }
 
 void taskC()
@@ -133,37 +131,63 @@ void taskC()
     opg::readImage(filename.c_str(), imageData);
     uint32_t channelSize = opg::getImageFormatChannelSize(imageData.format);
     uint32_t channelCount = opg::getImageFormatChannelCount(imageData.format);
-    int width = imageData.width;
-    int height = imageData.height;
-    int channels = channelCount;
-    int totalElements = width * height * channels;
-    int floatingElements = totalElements * sizeof(float);
-    std::vector<float> input_image_float(totalElements);
-    for (int i = 0; i < totalElements; ++i)
-    {
-        input_image_float[i] = static_cast<float>(imageData.data[i]);
-    }
-    float *d_input;
-    float *d_output;
-    cudaMalloc(&d_input, floatingElements);
-    cudaMalloc(&d_output, floatingElements);
-    cudaMemcpy(d_input, input_image_float.data(), floatingElements, cudaMemcpyHostToDevice);
-    applySobelFilter(d_input, d_output, width, height, channels);
-    std::vector<float> output_image_float(totalElements);
-    cudaMemcpy(output_image_float.data(), d_output, floatingElements, cudaMemcpyDeviceToHost);
-    for (int i = 0; i < totalElements; ++i)
-    {
-        //this might be more than 255 so it needs to be clamped to the uint8 range 
-        if (output_image_float[i] > 255.0f)
-        {
-            output_image_float[i] = 255.0f;
-        }
-        imageData.data[i] = static_cast<uint8_t>(output_image_float[i]);
-    }
+
     // Each color channel stores a single uint8_t (or unsigned char) value per pixel.
-    cudaFree(d_input);
-    cudaFree(d_output);
     OPG_CHECK(channelSize == 1);
+
+    int n = imageData.width * imageData.height;
+
+    // move image data to gpu
+    uint8_t* d_image;
+    cudaMallocManaged(&d_image, n*channelCount);
+    std::memcpy(d_image, imageData.data.data(), n*channelCount);
+
+    // create gradient images on gpu
+    int *G_x, *G_y, *G_x_intermediate, *G_y_intermediate;
+    cudaMallocManaged(&G_x, n*channelCount*sizeof(int));
+    cudaMallocManaged(&G_y, n*channelCount*sizeof(int));
+    cudaMallocManaged(&G_x_intermediate, n*channelCount*sizeof(int));
+    cudaMallocManaged(&G_y_intermediate, n*channelCount*sizeof(int));
+
+    // create kernels
+    std::vector<int> x_horizontal = { 1, 0, -1 };
+    std::vector<int> x_vertical = { 1, 2, 1 };
+    std::vector<int> y_horizontal = { 1, 2, 1 };
+    std::vector<int> y_vertical = { 1, 0, -1 };
+    int *d_x_horizontal, *d_x_vertical, *d_y_horizontal, *d_y_vertical;
+    cudaMallocManaged(&d_x_horizontal, 3*sizeof(int)); std::memcpy(d_x_horizontal, x_horizontal.data(), 3*sizeof(int));
+    cudaMallocManaged(&d_x_vertical, 3*sizeof(int)); std::memcpy(d_x_vertical, x_vertical.data(), 3*sizeof(int));
+    cudaMallocManaged(&d_y_horizontal, 3*sizeof(int)); std::memcpy(d_y_horizontal, y_horizontal.data(), 3*sizeof(int));
+    cudaMallocManaged(&d_y_vertical, 3*sizeof(int)); std::memcpy(d_y_vertical, y_vertical.data(), 3*sizeof(int));
+
+    // horizontal pass
+    runHorizontalPass(n, imageData.width, imageData.height, channelCount, d_image, G_x_intermediate, d_x_horizontal);
+    runHorizontalPass(n, imageData.width, imageData.height, channelCount, d_image, G_y_intermediate, d_y_horizontal);
+
+    CUDA_SYNC_CHECK();
+
+    // vertical pass
+    runVerticalPass(n, imageData.width, imageData.height, channelCount, G_x_intermediate, G_x, d_x_vertical);
+    runVerticalPass(n, imageData.width, imageData.height, channelCount, G_y_intermediate, G_y, d_y_vertical);
+
+    CUDA_SYNC_CHECK();
+
+    // compute magnitude
+    runComputeMagnitude(n, channelCount, d_image, G_x, G_y);
+
+    CUDA_SYNC_CHECK();
+
+    std::memcpy(imageData.data.data(), d_image, n*channelCount);
+
+    cudaFree(d_image);
+    cudaFree(G_x);
+    cudaFree(G_y);
+    cudaFree(G_x_intermediate);
+    cudaFree(G_y_intermediate);
+    cudaFree(d_x_horizontal);
+    cudaFree(d_x_vertical);
+    cudaFree(d_y_horizontal);
+    cudaFree(d_y_vertical);
 
     //
 
@@ -182,6 +206,17 @@ void taskD()
     float threshold = 0.5f;
     int totalCount = 10000000;
     int aboveThresholdCount = 0; // compute this value
+
+    float* d_data;
+    cudaMallocManaged(&d_data, totalCount * sizeof(float));
+
+    runRandom(totalCount, d_data);
+    CUDA_SYNC_CHECK();
+
+    runCount(totalCount, d_data, threshold, &aboveThresholdCount);
+    CUDA_SYNC_CHECK();
+
+    cudaFree(d_data);
 
     //
 
@@ -227,6 +262,23 @@ void taskE()
     // 40059, 27133, 23270,
     // 39432, 28626, 26127,
     // 40192, 26453, 26179
+
+    float *d_out, *d_lhs, *d_rhs;
+    cudaMallocManaged(&d_out, output.size()*sizeof(float));
+    cudaMallocManaged(&d_lhs, lhs.size()*sizeof(float));
+    cudaMallocManaged(&d_rhs, rhs.size()*sizeof(float));
+
+    std::memcpy(d_lhs, lhs.data(), lhs.size()*sizeof(float));
+    std::memcpy(d_rhs, rhs.data(), rhs.size()*sizeof(float));
+
+    runMatrixMultiply(lhsRows, lhsCols, d_lhs, rhsRows, rhsCols, d_rhs, d_out);
+    CUDA_SYNC_CHECK();
+
+    std::memcpy(output.data(), d_out, output.size()*sizeof(float));
+
+    cudaFree(d_out);
+    cudaFree(d_lhs);
+    cudaFree(d_rhs);
 
     //
 

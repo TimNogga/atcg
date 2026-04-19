@@ -3,6 +3,7 @@
 #include "opg/glmwrapper.h"
 #include "opg/hostdevice/misc.h"
 #include <cstdint>
+#include <cmath>
 
 #include "kernels.h"
 
@@ -11,118 +12,155 @@
 // linked against the application such that we can simply call the functions defined in the kernels.cu file.
 // The following custom pragma notifies our build system that this file should be compiled into a "normal" .obj file.
 #pragma cuda_source_property_format=OBJ
+
 __global__
-void multiplyKernel(int *d_dataArray, int constant, int size) {
-     int index = blockIdx.x * blockDim.x + threadIdx.x;
-     int stride = blockDim.x * gridDim.x;
-     for (int i = index; i < size; i += stride) {
-         d_dataArray[i] *= constant;
-     }
+void multiply(int n, int* arr, int scalar) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+	for (int i = index; i < n; i += stride) {
+		arr[i] *= scalar;
+	}
+}
 
+void runMultiply(int n, int* arr, int scalar) {
+	multiply<<<256, 256>>>(n, arr, scalar);
+	cudaDeviceSynchronize();
 }
-void multiplyByConstant(int *d_dataArray, int constant, int size) {
-    int blockSize = 256;
-    int numBlocks = (size + blockSize - 1) / blockSize;
-    multiplyKernel<<<numBlocks, blockSize>>>(d_dataArray, constant, size);
-}
+
 __global__
-void horizontalSobel(float* input, float* output, int width, int height, int channels) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= 1 && x < width -1 && y < height){
-        for(int c = 0; c < channels; ++c) {
-            int center_idx = (y *width +x) *channels + c;
-            int left_idx = (y *width + (x-1)) *channels + c;
-            int right_idx = (y *width + (x+1)) *channels + c;
-            output[center_idx] = input[right_idx] - input[left_idx];
+void horizontalPass(int n, int width, int height, int channels, uint8_t* img, int* out, int* kernel) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+	for (int i = index; i < n; i += stride) {
+		int x = i % width;
+		int y = i / width;
 
+		if (x == 0 || x == width - 1) {
+			for (int j = 0; j < channels; j++) {
+				out[(y * width + x) * channels + j] = 0;
+			}
 
+			continue;
+		}
 
-        }
+		for (int j = 0; j < channels; j++) {
+			int left = img[(y * width + x-1) * channels + j];
+			int middle = img[(y * width + x) * channels + j];
+			int right = img[(y * width + x+1) * channels + j];
+
+			out[(y * width + x) * channels + j] = kernel[2] * left + kernel[1] * middle + kernel[0] * right;
+		}
+	}
 }
-}
+
 __global__
-void verticalSobel(float* input, float* output, int width, int height, int channels) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < width && y >= 1 && y < height - 1){
-        for(int c = 0; c < channels; ++c) {
-            int center_idx = (y *width +x) *channels + c;
-            int top_idx = ((y-1) *width + x) *channels + c;
-            int bottom_idx = ((y+1) *width + x) *channels + c;
-            output[center_idx] = input[bottom_idx] - input[top_idx];
+void verticalPass(int n, int width, int height, int channels, int* img, int* out, int* kernel) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+	for (int i = index; i < n; i += stride) {
+		int x = i % width;
+		int y = i / width;
 
+		if (y == 0 || y == height - 1) {
+			for (int j = 0; j < channels; j++) {
+				out[(y * width + x) * channels + j] = 0;
+			}
 
+			continue;
+		}
 
+		for (int j = 0; j < channels; j++) {
+			int top = img[((y-1) * width + x) * channels + j];
+			int middle = img[(y * width + x) * channels + j];
+			int bottom = img[((y+1) * width + x) * channels + j];
 
-        }
+			out[(y * width + x) * channels + j] = kernel[2] * top + kernel[1] * middle + kernel[0] * bottom;
+		}
+	}
 }
-}
-__global__ 
-void verticalSobelSmoothing(float* input, float* output, int width, int height, int channels) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < width && y >= 1 && y < height - 1){
-        for(int c = 0; c < channels; ++c) {
-            int center_idx = (y *width +x) *channels + c;
-            int top_idx = ((y-1) *width + x) *channels + c;
-            int bottom_idx = ((y+1) *width + x) *channels + c;
-            output[center_idx] = input[top_idx] + (2.0f * input[center_idx]) + input[bottom_idx];
-        }
-}
-}
-__global__ 
-void horizontalSobelSmoothing(float* input, float* output, int width, int height, int channels) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= 1 && x < width -1 && y < height){
-        for(int c = 0; c < channels; ++c) {
-            int center_idx = (y *width +x) *channels + c;
-            int left_idx = (y *width + (x-1)) *channels + c;
-            int right_idx = (y *width + (x+1)) *channels + c;
-            output[center_idx] = input[left_idx] + (2.0f * input[center_idx]) + input[right_idx];
-        }
-}
-}
+
 __global__
-void computeMagintude(float* horizontal, float* vertical, float* output, int width, int height, int channels) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < width && y < height){
-        for(int c = 0; c < channels; ++c) {
-            int center_idx = (y *width +x) *channels + c;
-            float h = horizontal[center_idx];
-            float v = vertical[center_idx];
-            output[center_idx] = sqrt(h * h + v * v);
-        }
+void computeMagnitude(int n, int channels, uint8_t* out, int* img1, int* img2) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+	for (int i = index; i < n; i += stride) {
+		// accumulate over all color channels
+		double val = 0;
+		for (int j = 0; j < channels; j++) {
+			val += img1[i*channels+j] * img1[i*channels+j] + img2[i*channels+j] * img2[i*channels+j];
+		}
+		val /= 3.0;
+		
+		uint8_t final_val = static_cast<uint8_t>(min(std::sqrt(val), 255.0));
+
+		for (int j = 0; j < channels; j++) {
+			out[i*channels+j] = final_val;
+		}
+	}
 }
+
+void runHorizontalPass(int n, int width, int height, int channels, uint8_t* img, int* out, int* kernel) {
+	horizontalPass<<<256, 256>>>(n, width, height, channels, img, out, kernel);
 }
-void applySobelFilter(float *input_image, float *output_image, int width, int height, int channels) {
-    int imageSize = width * height * channels * sizeof(float);
-    float *d_temp, *d_horizontal, *d_vertical;
-    cudaMalloc(&d_temp, imageSize);
-    cudaMalloc(&d_horizontal, imageSize);
-    cudaMalloc(&d_vertical, imageSize);
-    
-    dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
-    horizontalSobel<<<gridSize, blockSize>>>(input_image, d_temp, width, height, channels);
-    cudaDeviceSynchronize();
-    
-    verticalSobelSmoothing<<<gridSize, blockSize>>>(d_temp, d_horizontal, width, height, channels);
-    cudaDeviceSynchronize();
-
-    verticalSobel<<<gridSize, blockSize>>>(input_image, d_temp, width, height, channels);
-    cudaDeviceSynchronize();
-    
-    horizontalSobelSmoothing<<<gridSize, blockSize>>>(d_temp, d_vertical, width, height, channels);
-    cudaDeviceSynchronize();
-
-    computeMagintude<<<gridSize, blockSize>>>(d_horizontal, d_vertical, output_image, width, height, channels);
-    cudaDeviceSynchronize();
-
-    cudaFree(d_temp);
-    cudaFree(d_horizontal);
-    cudaFree(d_vertical);
+void runVerticalPass(int n, int width, int height, int channels, int* img, int* out, int* kernel) {
+	verticalPass<<<256, 256>>>(n, width, height, channels, img, out, kernel);
 }
+
+void runComputeMagnitude(int n, int channels, uint8_t* out, int* img1, int* img2) {
+	computeMagnitude<<<256, 256>>>(n, channels, out, img1, img2);
+}
+
+__global__
+void random(int n, float* arr) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+
+	uint32_t seed = sampleTEA32(index, stride);
+	PCG32 generator(seed);
+
+	for (int i = index; i < n; i += stride) {
+		arr[i] = generator.nextFloat();
+	}
+}
+
+__global__
+void count(int n, float* arr, float threshold, int* result) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+	for (int i = index; i < n; i += stride) {
+		if (arr[i] > threshold) {
+			atomicAdd(result, 1);
+		}
+	}
+}
+
+void runRandom(int n, float* arr) {
+	random<<<256, 256>>>(n, arr);
+}
+
+void runCount(int n, float* arr, float threshold, int* result) {
+	count<<<256, 256>>>(n, arr, threshold, result);
+}
+
+__global__
+void matrixMultiply(int lhsRows, int lhsCols, float* lhs, int rhsRows, int rhsCols, float* rhs, float* out) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = blockDim.x * gridDim.x;
+
+	for (int i = index; i < lhsRows * rhsCols; i += stride) {
+		int x = i % rhsCols;
+		int y = i / rhsCols;
+
+		for (int j = 0; j < rhsRows; j++) {
+			out[x + y * rhsCols] += lhs[j + y * lhsCols] * rhs[x + j * rhsCols];
+		}
+	}
+}
+
+void runMatrixMultiply(int lhsRows, int lhsCols, float* lhs, int rhsRows, int rhsCols, float* rhs, float* out) {
+	matrixMultiply<<<1, 256>>>(lhsRows, lhsCols, lhs, rhsRows, rhsCols, rhs, out);
+}
+
+
+//
