@@ -142,7 +142,7 @@ std::pair<opg::ImageData, std::vector<std::vector<float>>> robertson(const std::
             calcLightValsDiv(x_buffer.data(), x_num_buffer.data(), x_denom_buffer.data(), width * height);
             
             // 3. calculate the new inverse CRF estimate
-            calcIEstim(I_unnorm_buffer.data(), exposures_buffer.data(), x_buffer.data(), channel_buffers[i].data(), underexposed_buffer.data(), counters_buffer.data(), number_imgs, height * width);
+            calcIEstim(I_unnorm_buffer.data(), exposures_buffer.data(), x_buffer.data(), channel_buffers[i].data(), counters_buffer.data(), number_imgs, height * width);
             
             // 4. normalize the inverse CRF
             normInvCrf(I_unnorm_buffer.data(), 256);

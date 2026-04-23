@@ -190,7 +190,7 @@ void calcLightValsDenominatorKernel(float* x_denom, uint8_t* pixels, float* weig
 }
 
 __global__
-void calcIEstimSumKernel(float* I_hat_unscaled, float* exposures, float* x, uint8_t* pixels, bool* underexposed_mask, uint32_t num_imgs, uint32_t num_values)
+void calcIEstimSumKernel(float* I_hat_unscaled, float* exposures, float* x, uint8_t* pixels, uint32_t num_imgs, uint32_t num_values)
 {
     const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gid >= (num_values * num_imgs))
@@ -200,12 +200,6 @@ void calcIEstimSumKernel(float* I_hat_unscaled, float* exposures, float* x, uint
 
     const uint32_t i = gid / num_values; // Logically this should give me the right t index for the exposures array
     const uint32_t j = gid % num_values; // counter for which pixel we are currently on
-
-    if (underexposed_mask[j])
-    {
-        return;
-    }
-
     const uint32_t yij = pixels[gid];
 
     float value = exposures[i] * x[j];
@@ -371,13 +365,13 @@ void calcLightValsDiv(float* x_hat, float* x_num, float* x_denom, uint32_t num_v
     cudaDeviceSynchronize();
 }
 
-void calcIEstim(float* I_unnorm_buffer, float* exposures, float* x, uint8_t* pixels, bool* underexposed_mask, uint32_t* counters, uint32_t number_imgs, uint32_t num_values)
+void calcIEstim(float* I_unnorm_buffer, float* exposures, float* x, uint8_t* pixels, uint32_t* counters, uint32_t number_imgs, uint32_t num_values)
 {
     // launch Sum kernel
     {
         const int block_size  = 512; // 512 is a size that works well with modern GPUs.
         const int block_count = ceil_div<int>(num_values*number_imgs, block_size); // Spawn enough blocks
-        calcIEstimSumKernel<<<block_count, block_size>>>(I_unnorm_buffer, exposures, x, pixels, underexposed_mask, number_imgs, num_values);
+        calcIEstimSumKernel<<<block_count, block_size>>>(I_unnorm_buffer, exposures, x,  pixels, number_imgs, num_values);
     }
 
     cudaDeviceSynchronize();
