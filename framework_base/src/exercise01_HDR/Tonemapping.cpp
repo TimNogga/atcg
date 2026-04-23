@@ -62,17 +62,34 @@ opg::ImageData tonemapImage(const opg::ImageData& img, const std::string& mode)
     if (mode == "linear_max")
     {
         // TODO: implement linear tone mapping with maximum color value as scaling factor
-//
+
+        opg::DeviceBuffer<float> max_buffer(1);
+        float max_value = -std::numeric_limits<float>::infinity();
+        max_buffer.upload(&max_value);
+
+        maxValue(hdr_img_buffer.data(), max_buffer.data(), img.width * img.height * inputChannelCount);
+
+        max_buffer.download(&max_value);
+
+        linearScaling(rgb_img_buffer.data(), 1.0f / max_value, img.width * img.height);
+
+        //
     }
     else if (mode == "linear_fixed")
     {
         // TODO: implement linear tone mapping with hand picked scaling factor
-//
+
+        linearScaling(rgb_img_buffer.data(), 1.0f / 6.0f, img.width * img.height);
+
+        //
     }
     else if (mode == "gamma_fixed")
     {
         // TODO: implement gamm tone mapping with hand picked gamma
-//
+
+        gammaCorrection(rgb_img_buffer.data(), 1.0f / 2.2f, img.width * img.height);
+
+        //
     }
     else if (mode == "histogram")
     {
@@ -112,10 +129,22 @@ opg::ImageData tonemapImage(const opg::ImageData& img, const std::string& mode)
 
         // TODO:
         // 1. compute histogram of brightness values
+        computeHistogram(filtered_hsv_brightness_buffer.data(), bins_buffer.data(), min_buffer.data(), max_buffer.data(), img.width * img.height, number_bins);
+        CUDA_SYNC_CHECK();
+
         // 2. compute cumulative sum
+        computeCumulativeHistogram(bins_buffer.data(), cum_bins_buffer.data(), number_bins);
+        CUDA_SYNC_CHECK();
+
         // 3. calculate respective probabilities for brightness values
+        computeProbabilities(accum_probs_buffer.data(), cum_bins_buffer.data(), img.width * img.height, number_bins);
+        CUDA_SYNC_CHECK();
+
         // 4. perform histogram mapping on unfiltered image
-//
+        histogramMapping(hsv_brightness_buffer.data(), filtered_hsv_brightness_buffer.data(), accum_probs_buffer.data(), min_buffer.data(), max_buffer.data(), img.width * img.height, number_bins);
+        CUDA_SYNC_CHECK();
+
+        //
 
         convertHsvToRgb(hsv_brightness_buffer.data(), rgb_img_buffer.data(), img.width * img.height);
         CUDA_SYNC_CHECK();

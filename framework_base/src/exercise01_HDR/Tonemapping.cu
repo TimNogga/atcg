@@ -271,6 +271,107 @@ __global__ void convertHsvToRgbKernel(glm::vec3* hsv_values, glm::vec3* rgb_valu
 }
 
 // TODO: put your CUDA kernels and the host functions which launch the kernels here
+
+__global__ void linearScalingKernel(glm::vec3* rgb_values, float factor, uint32_t number_pixels) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_pixels) return;
+
+    rgb_values[gid] *= factor;
+}
+
+void linearScaling(glm::vec3* rgb_values, float factor, uint32_t number_pixels) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_pixels, block_size);
+    linearScalingKernel<<<block_count, block_size>>>(rgb_values, factor, number_pixels);
+}
+
+__global__ void gammaCorrectionKernel(glm::vec3* rgb_values, float gamma, uint32_t number_pixels) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_pixels) return;
+
+    rgb_values[gid] = glm::pow(rgb_values[gid], glm::vec3(gamma));
+}
+
+void gammaCorrection(glm::vec3* rgb_values, float gamma, uint32_t number_pixels) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_pixels, block_size);
+    gammaCorrectionKernel<<<block_count, block_size>>>(rgb_values, gamma, number_pixels);
+}
+
+__global__ void computeHistogramKernel(glm::vec3* hsv_values, uint32_t* bins, float* min_value, float* max_value, uint32_t number_pixels, uint32_t number_bins) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_pixels) return;
+
+    float brightness = (hsv_values[gid].z - *min_value) / (*max_value - *min_value); // [0, 1] range
+
+    uint32_t bin = (uint32_t)(brightness * number_bins);
+
+    if (bin >= number_bins) bin = number_bins - 1;
+
+    atomicAdd(&bins[bin], 1);
+}
+
+__global__ void computeCumulativeHistogramKernel(uint32_t* bins, uint32_t* cum_bins, uint32_t number_bins) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_bins) return;
+
+    cum_bins[gid] = 0;
+
+    for (uint32_t i = 0; i < gid; i++) {
+        cum_bins[gid] += bins[i];
+    }
+}
+
+__global__ void computeProbabilitiesKernel(float* accum_probs, uint32_t* cum_bins, uint32_t number_pixels, uint32_t number_bins) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_bins) return;
+
+    accum_probs[gid] = (float)cum_bins[gid] / (float)number_bins;
+}
+
+__global__ void histogramMappingKernel(glm::vec3* hsv_values, glm::vec3* filtered_hsv_values, float* accum_probs, float* min_value, float* max_value, uint32_t number_pixels, uint32_t number_bins) {
+    const uint32_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (gid >= number_bins) return;
+
+    float brightness = (filtered_hsv_values[gid].z - *min_value) / (*max_value - *min_value); // [0, 1] range
+
+    uint32_t bin = (uint32_t)(brightness * number_bins);
+    
+    if (bin >= number_bins) bin = number_bins - 1;
+
+    hsv_values[gid].z = *min_value + (*max_value - *min_value) * accum_probs[bin];
+}
+
+void computeHistogram(glm::vec3* hsv_values, uint32_t* bins, float* min_value, float* max_value, uint32_t number_pixels, uint32_t number_bins) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_pixels, block_size);
+    computeHistogramKernel<<<block_count, block_size>>>(hsv_values, bins, min_value, max_value, number_pixels, number_bins);
+}
+
+void computeCumulativeHistogram(uint32_t* bins, uint32_t* cum_bins, uint32_t number_bins) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_bins, block_size);
+    computeCumulativeHistogramKernel<<<block_count, block_size>>>(bins, cum_bins, number_bins);
+}
+
+void computeProbabilities(float* accum_probs, uint32_t* cum_bins, uint32_t number_pixels, uint32_t number_bins) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_bins, block_size);
+    computeProbabilitiesKernel<<<block_count, block_size>>>(accum_probs, cum_bins, number_pixels, number_bins);
+}
+
+void histogramMapping(glm::vec3* hsv_values, glm::vec3* filtered_hsv_values, float* accum_probs, float* min_value, float* max_value, uint32_t number_pixels, uint32_t number_bins) {
+    const int block_size = 512;
+    const int block_count = ceil_div<int>(number_bins, block_size);
+    histogramMappingKernel<<<block_count, block_size>>>(hsv_values, filtered_hsv_values, accum_probs, min_value, max_value, number_pixels, number_bins);
+}
+
 //
 
 void maxValue(float* values, float* max_value, uint32_t number_values)

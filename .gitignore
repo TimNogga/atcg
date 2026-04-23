@@ -70,5 +70,5 @@ Testing/
 
 # custom
 bin/
-*.png
-!data/
+framework_base/*.png
+!data/*
