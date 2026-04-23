@@ -27,4 +27,10 @@ void normInvCrf(float* I, uint32_t number_values);
 // TODO: declare your functions here
 //
 
+void calcLightValsNumerator(float* x_num, uint8_t* pixels, float* weights, float* exposures, float* I, uint32_t number_imgs, uint32_t num_values, uint32_t iteration);
+void calcLightValsDenominator(float* x_denom, uint8_t* pixels, float* weights, float* exposures, uint32_t number_imgs, uint32_t num_values);
+void calcLightValsDiv(float* x_hat, float* x_num, float* x_denom, uint32_t num_values);
+
+void calcIEstim(float* I_unnorm_buffer, float* exposures, float* x, uint8_t* pixels, uint32_t* counters, uint32_t number_imgs, uint32_t num_values);
+
 std::pair<opg::ImageData, std::vector<std::vector<float>>> robertson(const std::vector<opg::ImageData> &imgs, const std::vector<float> &exposures, size_t max_iterations = 10);

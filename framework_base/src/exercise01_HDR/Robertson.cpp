@@ -9,6 +9,11 @@
 
 std::pair<opg::ImageData, std::vector<std::vector<float>>> robertson(const std::vector<opg::ImageData> &imgs, const std::vector<float> &exposures, size_t max_iterations)
 {
+
+    // imgs stores the images as rgbrgbrgbrgb format
+    // exposured has the exposure values for the images
+    // max iterations is a hyperparameter
+
     if (imgs.size() != exposures.size())
     {
         std::cout << "Error: number of images has to match number of exposure times" << std::endl;
@@ -74,14 +79,14 @@ std::pair<opg::ImageData, std::vector<std::vector<float>>> robertson(const std::
     exposures_buffer.upload(exposures.data());
 
     // allocate auxilliary buffers for algorithm
-    opg::DeviceBuffer<uint32_t> counters_buffer(256);
+    opg::DeviceBuffer<uint32_t> counters_buffer(256); // E_m or card(E_m) to be precise
     opg::DeviceBuffer<float> weights_buffer(number_imgs * width * height);
     opg::DeviceBuffer<bool> underexposed_buffer(width * height);
-    opg::DeviceBuffer<float> x_nom_buffer(width * height);
+    opg::DeviceBuffer<float> x_num_buffer(width * height);
     opg::DeviceBuffer<float> x_denom_buffer(width * height);
     opg::DeviceBuffer<float> x_buffer(width * height);
     opg::DeviceBuffer<float> I_unnorm_buffer(256);
-    opg::DeviceBuffer<float> I_buffer(256);
+    opg::DeviceBuffer<float> I_buffer(256); // 256 float values
 
     std::cout << "run precalculations" << std::endl;
 
@@ -98,40 +103,58 @@ std::pair<opg::ImageData, std::vector<std::vector<float>>> robertson(const std::
         result_I_channel_buffers.emplace_back(256);
     }
 
-    // run algorithm separately for channels
-    for (size_t i = 0; i < channel_buffers.size(); i++)
+    // run algorithm separately for rgb channels
+    for (size_t i = 0; i < channel_buffers.size(); i++) // channel_buffers.size() should therefor be 3 for an rgb image
     {
         std::cout << "process channel " << i << std::endl;
 
         // reset buffers where necessary
         cudaMemset(counters_buffer.data(), 0, 256 * sizeof(uint32_t));
         cudaMemset(underexposed_buffer.data(), 0, width * height * sizeof(bool));
-        CUDA_SYNC_CHECK();
 
-        // mask out pixels which are in general underexposed
+        // a)
+
+        // mask out pixels which are in general underexposed (All pixels which are)
         calcMask(channel_buffers[i].data(), underexposed_buffer.data(), number_imgs * width * height, width * height);
-        CUDA_SYNC_CHECK();
 
         // count occurences of different numbers
         countValues(channel_buffers[i].data(), underexposed_buffer.data(), counters_buffer.data(), number_imgs * width * height, width * height);
-        CUDA_SYNC_CHECK();
 
         // calculate weights (low for extreme values)
         calcWeights(channel_buffers[i].data(), weights_buffer.data(), number_imgs * width * height);
-        CUDA_SYNC_CHECK();
 
         // init inverse CRF linearly
-        initInvCrf(I_buffer.data(), 256);
-        CUDA_SYNC_CHECK();
+        initInvCrf(I_buffer.data(), 256); // WTF is this Kernel. It gets only executed n = 256 times anyways
 
         for (size_t iteration = 0; iteration < max_iterations; iteration++)
         {
             // TODO:
             // 1. reset/initialize your buffers for this iteration
+
+            cudaMemset(x_num_buffer.data(), 0, x_num_buffer.byteSize());
+            cudaMemset(x_denom_buffer.data(), 0, x_denom_buffer.byteSize());
+            cudaMemset(x_buffer.data(), 0, x_buffer.byteSize());
+            cudaMemset(I_unnorm_buffer.data(), 0, I_unnorm_buffer.byteSize());
+
             // 2. calculate the irradiance estimate
+            calcLightValsNumerator(x_num_buffer.data(), channel_buffers[i].data(), weights_buffer.data(), exposures_buffer.data(), I_buffer.data(), number_imgs, width * height, iteration);
+            calcLightValsDenominator(x_denom_buffer.data(), channel_buffers[i].data(), weights_buffer.data(), exposures_buffer.data(), number_imgs, width * height);
+            calcLightValsDiv(x_buffer.data(), x_num_buffer.data(), x_denom_buffer.data(), width * height);
+            
             // 3. calculate the new inverse CRF estimate
+            calcIEstim(I_unnorm_buffer.data(), exposures_buffer.data(), x_buffer.data(), channel_buffers[i].data(), counters_buffer.data(), number_imgs, height * width);
+            
             // 4. normalize the inverse CRF
-//
+            normInvCrf(I_unnorm_buffer.data(), 256);
+            // I_buffer.upload(I_unnorm_buffer.data()); // The unnorm buffer is normed at this point btw.
+
+            cudaMemcpy(
+                I_buffer.data(), 
+                I_unnorm_buffer.data(), 
+                I_unnorm_buffer.byteSize(), 
+                cudaMemcpyDeviceToDevice
+            );
+
         }
 
         // copy results for this channel to not overwrite them with next channel results
