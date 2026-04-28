@@ -92,7 +92,11 @@ void taskB()
 
     std::memcpy(d_dataArray, dataArray.data(), n * sizeof(int));
 
-    cudaMemPrefetchAsync(d_dataArray, n*sizeof(int), 0, 0);
+    cudaMemLocation gpuLocation;
+    gpuLocation.type = cudaMemLocationTypeDevice;
+    gpuLocation.id = 0;
+    /* #pragma ignore */{
+    cudaMemPrefetchAsync(d_dataArray, n*sizeof(int), gpuLocation, 0); }
     runMultiply(n, d_dataArray, 7);
 
     std::memcpy(dataArray.data(), d_dataArray, n * sizeof(int));
