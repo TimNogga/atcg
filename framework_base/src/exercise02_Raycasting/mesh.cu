@@ -99,7 +99,21 @@ extern "C" __global__ void __closesthit__mesh()
     }
     else
     {
-        // TODO tangent from UVs
+        const glm::vec2 UV0 = mesh_data->uvs[tri.x];
+        const glm::vec2 UV1 = mesh_data->uvs[tri.y];
+        const glm::vec2 UV2 = mesh_data->uvs[tri.z];
+        glm::vec3 E1 = P1 - P0;
+        glm::vec3 E2 = P2 - P0;
+        glm::vec2 dUV1 = UV1 - UV0;
+        glm::vec2 dUV2 = UV2 - UV0;
+
+ 
+        const float inv_det = 1.0f / (dUV1.x * dUV2.y - dUV2.x * dUV1.y);
+        glm::vec3 obj_tangent = inv_det * (dUV2.y * E1 - dUV1.y * E2);
+
+        si->tangent = optixTransformVectorFromObjectToWorldSpace(obj_tangent);
+        si->tangent = glm::normalize(si->tangent - glm::dot(si->tangent, si->normal) * si->normal);
+
     }
 
     si->primitive_index = optixGetPrimitiveIndex();
@@ -143,10 +157,20 @@ extern "C" __global__ void __anyhit__mesh()
     const glm::vec2 UV2 = mesh_data->uvs[tri.z];
     glm::vec2 uv = (1.0f-barys.x-barys.y)*UV0 + barys.x*UV1 + barys.y*UV2;
 
-    /* Implement:
-     * - Cutout the holes of a level 3 Menger sponge given the UV coordinates in [0, 1]^2 on the face of a cube.
-     * - Discard intersections via `void optixIgnoreIntersection()`.
-     */
-
-    //
+  
+    glm::vec2 s = uv;
+    const int level = 3;
+    for (int i = 0; i < level; ++i)
+    {
+        s *= 3.0f;
+        glm::vec2 idx = glm::floor(s);
+        int ix = static_cast<int>(idx.x);
+        int iy = static_cast<int>(idx.y);
+        if ((ix % 3 == 1) && (iy % 3 == 1))
+        {
+            optixIgnoreIntersection();
+            return;
+        }
+        s = s - idx;
+    }
 }
