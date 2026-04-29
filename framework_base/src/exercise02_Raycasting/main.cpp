@@ -55,6 +55,20 @@ void createSceneGeometry(opg::Scene *scene)
         props.setMatrix("to_world", to_world);
         auto ellipsoidInstance = scene->createSceneComponent<opg::ShapeInstance>(props);
     }
+    {
+        SphereShape *sphereb = scene->createSceneComponent<SphereShape>(opg::Properties()); //add the sphere from task b
+        glm::mat4 to_world = glm::mat4(1);
+        glm::mat4 S = glm::scale(glm::mat4(1), glm::vec3(0.25f, 0.75f, 0.25f));
+        glm::mat4 R = glm::rotate(glm::mat4(1), M_PIf/4.0f, glm::vec3(0, 0, 1));
+        glm::mat4 T = glm::translate(glm::vec3(0, 1, 0));
+        to_world = T * R * S;
+
+        opg::Properties props;
+        props.setComponent("shape", sphereb);
+        props.setMatrix("to_world", to_world);
+        auto ellipsoidInstance = scene->createSceneComponent<opg::ShapeInstance>(props);
+    }
+    
 
     // Add a cube scaled by 0.5 translated to (-1, 0, 0)
     {
