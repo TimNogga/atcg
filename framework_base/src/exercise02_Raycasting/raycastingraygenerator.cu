@@ -31,16 +31,11 @@ extern "C" __global__ void __raygen__main()
 
     // Index of current pixel in image
     const glm::uvec2 pixel_index = glm::uvec2(launch_idx.x, launch_idx.y);
+    glm::vec2 viewport_coordinates = 2.0f * ((glm::vec2(pixel_index) + 0.5f) / glm::vec2(launch_dims)) - 1.0f;
+    glm::vec3 ray_origin;
+    glm::vec3 ray_dir;
+    spawn_camera_ray(params.camera, viewport_coordinates, ray_origin, ray_dir);
 
-    /* Implement:
-     * - Generate camera rays
-     */
-
-    // NOTE: this is a dummy implementation such that you are at least able to see something in the scene by default:
-    glm::vec3 ray_origin = glm::vec3(glm::vec2(launch_idx) / glm::vec2(launch_dims) * 4.0f - 2.0f, 10.0f);
-    glm::vec3 ray_dir = glm::vec3(0, 0, -1);
-
-    //
 
     SurfaceInteraction si;
     traceWithDataPointer<SurfaceInteraction>(
