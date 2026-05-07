@@ -87,32 +87,80 @@ __device__ PrimitiveData makePrimitiveData(const ComputeFormFactorMatrixInstance
 //
 
 
-
 extern "C" __global__ void __raygen__generateRadiosity()
 {
     const uint3 idx = optixGetLaunchIndex();
-    const uint3 dim = optixGetLaunchDimensions();
 
-    // When part_1 and part_2 are the same sub geometry the sub matrix is symmetric
-    // Therefore we do not need to compute the upper diagonal part in its own thread
-    if (params.instance_1.form_factor_matrix_offset == params.instance_2.form_factor_matrix_offset && idx.x > idx.y)
-        return;
+    bool same_geometry = (params.instance_1.form_factor_matrix_offset == params.instance_2.form_factor_matrix_offset);
+    if (same_geometry && idx.x > idx.y) return;
 
-    // Compute the form factor F_ij between these two triangle primitives
     PrimitiveData primitive_1 = makePrimitiveData(params.instance_1, idx.x);
     PrimitiveData primitive_2 = makePrimitiveData(params.instance_2, idx.y);
+    
+    int i = primitive_1.matrix_index;
+    int j = primitive_2.matrix_index;
+    int matrix_size = params.form_factor_matrix_size;
 
+    glm::vec3 center_i = (primitive_1.position[0] + primitive_1.position[1] + primitive_1.position[2]) / 3.0f;
+    glm::vec3 center_j = (primitive_2.position[0] + primitive_2.position[1] + primitive_2.position[2]) / 3.0f;
+    
+    glm::vec3 n_i = primitive_1.normal[0]; 
+    glm::vec3 n_j = primitive_2.normal[0];
 
+    glm::vec3 e1_i = primitive_1.position[1] - primitive_1.position[0];
+    glm::vec3 e2_i = primitive_1.position[2] - primitive_1.position[0];
+    float area_i = 0.5f * glm::length(glm::cross(e1_i, e2_i));
 
-    /* Implement:
-     * - compute the entries of the matrix params.form_factor_matrix (called F_ij in the lecture) that describes the light transport between two surface patches
-     * - take the visibility into account
-     */
+    glm::vec3 e1_j = primitive_2.position[1] - primitive_2.position[0];
+    glm::vec3 e2_j = primitive_2.position[2] - primitive_2.position[0];
+    float area_j = 0.5f * glm::length(glm::cross(e1_j, e2_j));
 
-    //
+    glm::vec3 dir = center_j - center_i;
+    float dist = glm::length(dir);
+    
+    float F_ij = 0.0f;
+
+    if (dist >= 1e-5f) 
+    {
+        dir /= dist;
+
+        float cos_theta_i = glm::dot(n_i, dir);
+        float cos_theta_j = glm::dot(n_j, -dir);
+
+        if (cos_theta_i > 0.0f && cos_theta_j > 0.0f)
+        {
+            uint32_t is_occluded = 1; 
+           
+            optixTrace(
+                params.traversable_handle,
+                make_float3(center_i.x, center_i.y, center_i.z),
+                make_float3(dir.x, dir.y, dir.z),
+                params.scene_epsilon, dist - params.scene_epsilon, 0.0f,
+                OptixVisibilityMask(255),
+                OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_ANYHIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
+                0, 0, 1, 
+                is_occluded
+            );
+     
+            if (is_occluded == 0) 
+            {
+                F_ij = (1.0f / M_PI) * ((cos_theta_i * cos_theta_j) / (dist * dist)) * area_j;
+                
+                if (F_ij > 1.0f) F_ij = 1.0f; 
+            }
+        }
+    }
+
+    params.form_factor_matrix[i * matrix_size + j] = F_ij;
+
+ 
+    if (area_j > 0.0f) {
+        float F_ji = F_ij * (area_i / area_j);
+        if (F_ji > 1.0f) F_ji = 1.0f;
+        params.form_factor_matrix[j * matrix_size + i] = F_ji; // We must explicitly initialize every cell in the form factor matrix to prevent uninitialized memory from causing NaN  during the Jacobi solver phase i guess
+
+    }
 }
-
-
 extern "C" __global__ void __raygen__renderRadiosity()
 {
     const glm::uvec3 launch_idx  = optixGetLaunchIndexGLM();

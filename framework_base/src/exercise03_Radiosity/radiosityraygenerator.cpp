@@ -209,6 +209,63 @@ void RadiosityRayGenerator::computeRadiosity()
      */
 
     //
+    opg::DeviceBuffer<glm::vec3> radiosity_current;
+    radiosity_current.alloc(m_total_primitive_count);
+    
+    cudaMemcpy(
+        radiosity_current.data(), 
+        emissions_buffer.data(), 
+        m_total_primitive_count * sizeof(glm::vec3), 
+        cudaMemcpyDeviceToDevice
+    );
+
+    opg::DeviceBuffer<glm::vec3> radiosity_next;
+    radiosity_next.alloc(m_total_primitive_count);
+
+    const int NUM_ITERATIONS = 64; 
+    
+    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) 
+    {
+        launchJacobiIteration(
+            m_total_primitive_count,
+            lambda,
+            m_form_factor_matrix_buffer.data(),
+            emissions_buffer.data(),
+            albedos_buffer.data(),
+            radiosity_current.data(),
+            radiosity_next.data()
+        );
+        
+        CUDA_SYNC_CHECK(); 
+
+        cudaMemcpy(
+            radiosity_current.data(), 
+            radiosity_next.data(), 
+            m_total_primitive_count * sizeof(glm::vec3), 
+            cudaMemcpyDeviceToDevice
+        );
+    }
+
+    size_t current_offset = 0;
+    for (auto& emitter : m_radiosityEmitters) 
+    {
+        size_t count = emitter->m_primitiveCount;
+        
+        if (emitter->m_primitiveRadiosity.size() != count) {
+            emitter->m_primitiveRadiosity.alloc(count);
+        }
+
+        cudaMemcpy(
+            emitter->m_primitiveRadiosity.data(), 
+            radiosity_current.data() + current_offset, 
+            count * sizeof(glm::vec3), 
+            cudaMemcpyDeviceToDevice
+        );
+        
+        current_offset += count;
+    }
+    
+    CUDA_SYNC_CHECK();
 }
 
 
