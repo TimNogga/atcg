@@ -59,6 +59,11 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__opaque_sampleBSDF(co
      *   - Set the sampling pdf to 1 to indicate a valid result (The sampling pdf is used later for stochastic sampling methods)
      */
 
+    // result.outgoing_ray_dir = si.incoming_ray_dir - 2 * si.normal * glm::dot(si.normal, si.incoming_ray_dir);
+    result.outgoing_ray_dir = glm::reflect(si.incoming_ray_dir, si.normal);
+    result.bsdf_weight = sbt_data->specular_F0;
+    result.sampling_pdf = 1;
+
     //
 
     return result;
@@ -92,6 +97,46 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__refractive_sampleBSD
      *   Hint: The surface normals point outwards.
      *   Hint: You can use Schlick's approximation for the Fresnel term to compute the amount of light reflected or transmitted.
      */
+
+    glm::vec3 N = si.normal;
+
+    float cos_i = glm::dot(-si.incoming_ray_dir, N);
+
+    float eta_i = 1.0f;
+    float eta_t = sbt_data->index_of_refraction;
+
+    if (cos_i < 0.0f) { // exiting the medium
+        cos_i = -cos_i;
+        N = -N;
+        float tmp = eta_i;
+        eta_i = eta_t;
+        eta_t = tmp;
+    }
+
+    float eta = eta_i / eta_t;
+
+    float F0 = (eta_t - eta_i) / (eta_t + eta_i);
+    F0 *= F0;
+
+    glm::vec3 F = glm::vec3(fresnel_schlick(F0, abs(glm::dot(N, -si.incoming_ray_dir))));
+    
+
+    if (component_flags == +BSDFComponentFlag::IdealReflection) {
+        // result.outgoing_ray_dir = si.incoming_ray_dir - 2 * N * glm::dot(N, si.incoming_ray_dir);
+        result.outgoing_ray_dir = glm::reflect(si.incoming_ray_dir, N);
+        result.bsdf_weight = F;
+    } else if (component_flags == +BSDFComponentFlag::IdealTransmission) {
+        result.outgoing_ray_dir = glm::refract(si.incoming_ray_dir, N, eta);
+
+        if (glm::length2(result.outgoing_ray_dir) < 1e-6f) // total internal reflection
+            return result;
+
+        result.bsdf_weight = glm::vec3(1.0f) - F;
+    } else {
+        return result;
+    }
+
+    result.sampling_pdf = 1;
 
     //
 

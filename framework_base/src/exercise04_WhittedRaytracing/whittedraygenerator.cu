@@ -115,6 +115,24 @@ extern "C" __global__ void __raygen__main()
              *     Hint: The throughput of the ray between the surface interaction and camera is stored in `ray_ctx.throughput`.
              */
 
+            EmitterSamplingResult light_res = emitter->sampleLight(si, dummy_rng);
+
+            bool occlusion = traceOcclusion(
+                params.traversable_handle, 
+                si.position, 
+                light_res.direction_to_light, 
+                params.scene_epsilon, 
+                light_res.distance_to_light, 
+                params.occlusion_trace_params
+            );
+
+            if (!occlusion) {
+                BSDFEvalResult bsdf_res = bsdf->evalBSDF(si, light_res.direction_to_light, +BSDFComponentFlag::DiffuseReflection);
+
+                float cos_theta = glm::max(0.0f, glm::dot(si.normal, light_res.direction_to_light));
+                output_radiance += ray_ctx.throughput * bsdf_res.bsdf_value * light_res.radiance_weight_at_receiver * cos_theta / light_res.sampling_pdf;
+            }
+
             //
         }
 
