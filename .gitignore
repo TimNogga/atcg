@@ -72,6 +72,8 @@ Testing/
 bin/
 framework_base/*.png
 !data/*
+lib/ptx/
+imgui.ini
 
 # Custom Stefan Stuff
 *_Stefan*
