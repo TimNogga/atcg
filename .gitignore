@@ -72,3 +72,8 @@ Testing/
 bin/
 framework_base/*.png
 !data/*
+
+# Custom Stefan Stuff
+*_Stefan*
+tutorial/
+tutorial/*
