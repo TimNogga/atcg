@@ -124,6 +124,9 @@ extern "C" __device__ BSDFEvalResult __direct_callable__phong_evalBSDF(const Sur
      */
 
     // TODO implement
+    glm::vec3 reflection_dir = glm::reflect(si.incoming_ray_dir, si.normal);
+    float m = sbt_data->exponent;
+    specular_bsdf = sbt_data->specular_F0 * (m + 2.0f) / (2.0f * M_PIf) * glm::pow(glm::max(glm::dot(reflection_dir, outgoing_ray_dir), 0.0f), m);
 
     //
 
@@ -144,9 +147,7 @@ extern "C" __device__ BSDFEvalResult __direct_callable__ward_evalBSDF(const Surf
 {
     const WardBSDFData *sbt_data = *reinterpret_cast<const WardBSDFData **>(optixGetSbtDataPointer());
 
-
     glm::vec3 diffuse_bsdf = sbt_data->diffuse_color / M_PIf;
-
     glm::vec3 specular_bsdf = glm::vec3(0);
 
     /* Implement:
@@ -157,6 +158,20 @@ extern "C" __device__ BSDFEvalResult __direct_callable__ward_evalBSDF(const Surf
      */
 
     // TODO implement
+
+    glm::vec3 halfway = -si.incoming_ray_dir + outgoing_ray_dir;
+    float alpha = sbt_data->roughness_tangent, beta = sbt_data->roughness_bitangent;
+    const glm::vec3& tangent = si.tangent;
+    glm::vec3 bitangent = glm::normalize(glm::cross(si.normal, tangent));
+
+    float HdotN = glm::max(glm::dot(halfway, si.normal), 1e-6f);
+    float HdotH = glm::dot(halfway, halfway);
+    float HdotX = glm::dot(halfway, tangent);
+    float HdotY = glm::dot(halfway, bitangent);
+
+    float f = glm::exp(-((HdotX * HdotX) / (alpha * alpha) + (HdotY * HdotY) / (beta * beta)) / (HdotN * HdotN)) * HdotH / (glm::pow(HdotN, 4) * M_PIf * alpha * beta);
+    glm::vec3 fresnel = fresnel_schlick(sbt_data->specular_F0, glm::dot(outgoing_ray_dir, glm::normalize(halfway)));
+    specular_bsdf = f * fresnel;
 
     //
 
@@ -189,6 +204,31 @@ extern "C" __device__ BSDFEvalResult __direct_callable__ggx_evalBSDF(const Surfa
      */
 
     // TODO implement
+
+    const glm::vec3& incoming_ray_dir = -si.incoming_ray_dir;
+
+    glm::vec3 halfway = glm::normalize(incoming_ray_dir + outgoing_ray_dir);
+    float alpha = sbt_data->roughness_tangent, beta = sbt_data->roughness_bitangent;
+
+    const glm::vec3& tangent = si.tangent;
+    glm::vec3 bitangent = glm::normalize(glm::cross(si.normal, si.tangent));
+
+    float HdotN = glm::max(glm::dot(halfway, si.normal), 1e-6f);
+    float HdotX = glm::dot(halfway, tangent);
+    float HdotY = glm::dot(halfway, bitangent);
+    float VdotH = glm::dot(outgoing_ray_dir, halfway);
+    float NdotL = glm::dot(si.normal, incoming_ray_dir);
+    float NdotV = glm::dot(si.normal, outgoing_ray_dir);
+
+    float tan_term_incoming = (alpha * alpha * glm::pow(glm::dot(tangent, incoming_ray_dir), 2) + beta * beta * glm::pow(glm::dot(bitangent, incoming_ray_dir), 2)) / glm::pow(glm::dot(si.normal, incoming_ray_dir), 2);
+    float tan_term_outgoing = (alpha * alpha * glm::pow(glm::dot(tangent, outgoing_ray_dir), 2) + beta * beta * glm::pow(glm::dot(bitangent, outgoing_ray_dir), 2)) / glm::pow(glm::dot(si.normal, outgoing_ray_dir), 2);
+
+    float denom = HdotN * HdotN * (1.0f + (1.0f / (HdotN * HdotN)) * ((HdotX * HdotX) / (alpha * alpha) + (HdotY * HdotY) / (beta * beta)));
+    float dist = 1.0f / (M_PIf * alpha * beta * denom * denom);
+    float masking = 1.0f / (1.0f + ((-1.0f + glm::sqrt(1 + tan_term_incoming)) / 2.0f) + ((-1.0f + glm::sqrt(1 + tan_term_outgoing)) / 2.0f));
+    glm::vec3 fresnel = fresnel_schlick(sbt_data->specular_F0, VdotH);
+
+    specular_bsdf = dist * masking * fresnel / (4.0f * NdotL * NdotV);
 
     //
 
