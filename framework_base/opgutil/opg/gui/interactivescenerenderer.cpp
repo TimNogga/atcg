@@ -125,7 +125,7 @@ InteractiveSceneRenderer::InteractiveSceneRenderer(Scene *scene, uint32_t width,
     m_image_display { ImageFormat::FORMAT_RGB_UINT8 },
     m_stats_display { &m_window },
     m_scene { scene },
-    m_output_buffer { OutputBufferType::GL_INTEROP, width, height },
+    m_output_buffer { OutputBufferType::CUDA_DEVICE, width, height },
     m_hdr_buffer { width * height },
     m_width { width },
     m_height { height }
