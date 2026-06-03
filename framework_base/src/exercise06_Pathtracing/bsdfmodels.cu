@@ -162,11 +162,12 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__ggx_sampleBSDF(const
         float NdotL = glm::dot(normal, L);
 
         if (NdotL <= 0.0f) {
-            result.sampling_pdf = 0;
+            result.sampling_pdf = 0.0f;
             return result;
         }
 
         result.outgoing_ray_dir = L;
+        result.bsdf_weight = sbt_data->diffuse_color;
         result.sampling_pdf = branch_probability * NdotL / M_PI;
 
         //
@@ -177,6 +178,34 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__ggx_sampleBSDF(const
         float branch_probability = specular_probability;
 
         // TODO implement specular reflection
+
+        float u1 = rng.next1d();
+        float u2 = rng.next1d();
+
+        float NdotH = sqrt((1.0f - u1) / (1.0f + (sbt_data->roughness * sbt_data->roughness) * u1));
+        float sinThetaH = sqrt(glm::max(0.0f, 1.0f - NdotH * NdotH));
+
+        float phi = 2.0f * M_PI * u2;
+
+        float H_local_x = sinThetaH * cos(phi);
+        float H_local_y = sinThetaH * sin(phi);
+        float H_local_z = NdotH;
+
+        glm::vec3 H_local(H_local_x, H_local_y, H_local_z);
+        glm::vec3 H = local_frame * H_local;
+
+        glm::vec3 L = 2.0f * glm::dot(view_dir, H) * H - view_dir;
+
+        float NdotL = glm::dot(normal, L);
+
+        if (NdotL <= 0.0f) {
+            result.sampling_pdf = 0.0f;
+            return result;
+        }
+
+        result.outgoing_ray_dir = L;
+        result.bsdf_weight = sbt_data->specular_F0;
+        result.sampling_pdf = branch_probability * D_GGX(NdotH, sbt_data->roughness) * NdotH / (4 * glm::dot(L, H));
 
         //
     }
@@ -254,6 +283,8 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__refractive_sampleBSD
          */
 
         // TODO implement
+
+        
 
         //
     }
