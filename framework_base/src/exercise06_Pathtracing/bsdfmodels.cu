@@ -182,7 +182,7 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__ggx_sampleBSDF(const
         float u1 = rng.next1d();
         float u2 = rng.next1d();
 
-        float NdotH = sqrt((1.0f - u1) / (1.0f + (sbt_data->roughness * sbt_data->roughness) * u1));
+        float NdotH = sqrt((1.0f - u1) / (1.0f + (sbt_data->roughness * sbt_data->roughness - 1.0f) * u1));
         float sinThetaH = sqrt(glm::max(0.0f, 1.0f - NdotH * NdotH));
 
         float phi = 2.0f * M_PI * u2;
@@ -284,7 +284,18 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__refractive_sampleBSD
 
         // TODO implement
 
-        
+        float u = rng.next1d();
+
+        if (u <= reflection_probability) {
+            result.outgoing_ray_dir = reflected_ray_dir;
+            result.bsdf_weight = glm::vec3(reflection_probability);
+            result.sampling_pdf = 1.0f;
+            
+        } else {
+            result.outgoing_ray_dir = transmitted_ray_dir;
+            result.bsdf_weight = glm::vec3(transmission_probability);
+            result.sampling_pdf = 1.0f;
+        }
 
         //
     }
