@@ -145,6 +145,30 @@ extern "C" __device__ BSDFSamplingResult __direct_callable__ggx_sampleBSDF(const
 
         // TODO implement diffuse reflection
 
+        float u1 = rng.next1d();
+        float u2 = rng.next1d();
+
+        float r = sqrt(u1);
+        float phi = 2.0f * M_PI * u2;
+
+        float x = r * cos(phi);
+        float y = r * sin(phi);
+        float z = sqrt(1 - u1);
+
+        glm::vec3 local_dir(x, y, z);
+
+        glm::vec3 L = local_frame * local_dir;
+
+        float NdotL = glm::dot(normal, L);
+
+        if (NdotL <= 0.0f) {
+            result.sampling_pdf = 0;
+            return result;
+        }
+
+        result.outgoing_ray_dir = L;
+        result.sampling_pdf = branch_probability * NdotL / M_PI;
+
         //
     }
     else
