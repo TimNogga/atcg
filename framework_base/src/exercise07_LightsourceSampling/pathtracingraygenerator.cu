@@ -138,11 +138,16 @@ extern "C" __global__ void __raygen__main()
              */
 
             // Multiple importance sampling weight
-            // This **dummy** implementation only includes the light source if it could not be reached via BSDF importance sampling.
-            // So if the ray originates from the camera, or originates from a refractive material, the light is visible, otherwise the light will only be visible via the BSDF sampling below.
-            float mi_weight = can_ray_be_generated_by_light_source_sampling ? 0 : 1;
+            float mi_weight = 1;
 
             // TODO implement
+            if (can_ray_be_generated_by_light_source_sampling)
+            {
+                float bsdf_sampling_pdf = ray_ctx.last_sampling_pdf_for_mis;
+                float emitter_selection_pdf = si.emitter->emitter_weight / params.emitters_total_weight;
+                float light_sampling_pdf = emitter_selection_pdf * si.emitter->evalLightSamplingPdf(ray_ctx.last_interaction_for_mis, si);
+                mi_weight = bsdf_sampling_pdf / (bsdf_sampling_pdf + light_sampling_pdf);
+            }
 
             //
 
@@ -206,6 +211,7 @@ extern "C" __global__ void __raygen__main()
             float mi_weight = 1;
 
             // TODO implement
+            mi_weight = emitter_sampling_result.sampling_pdf / (emitter_sampling_result.sampling_pdf + bsdf_sampling_pdf);
 
             //
 
