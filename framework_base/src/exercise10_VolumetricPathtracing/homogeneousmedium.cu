@@ -14,10 +14,12 @@ extern "C" __device__ glm::vec3 __direct_callable__homogeneousMedium_evalTransmi
      * - Evaluate the transmittance for a certain distance along the given ray, i.e. the probability of encountering no absorbtion and no out-scattering.
      */
 
+    glm::vec3 sigma_t = sbt_data->sigma_a + sbt_data->sigma_s;
+    glm::vec3 transmittance = glm::exp(-distance * sigma_t);
+
     //
 
-    // Dummy implementation with no attenuation.
-    return glm::vec3(1);
+    return transmittance;
 }
 
 extern "C"  __device__ MediumSamplingResult __direct_callable__homogeneousMedium_sampleMediumEvent(const opg::Ray &ray, float max_distance, PCG32 &rng)
@@ -56,6 +58,8 @@ extern "C"  __device__ MediumSamplingResult __direct_callable__homogeneousMedium
 
         // TODO implement
 
+        result.transmittance_weight = glm::exp(-max_distance * sigma_t);
+
         //
 
         return result;
@@ -64,6 +68,21 @@ extern "C"  __device__ MediumSamplingResult __direct_callable__homogeneousMedium
     // TODO implement
     // result.interaction.incoming_distance = ...
     // result.transmittance_weight = ...
+
+    float u = rng.nextFloat();
+    float t = -glm::log(1 - u) / sigma_s_scalar;
+
+    if (t >= max_distance) {
+        result.interaction.set_invalid();
+        result.transmittance_weight = glm::exp(-max_distance * sigma_a);
+        return result;
+    }
+
+    result.interaction.incoming_distance = t;
+    result.interaction.position = ray.at(t);
+
+    float pdf = sigma_s_scalar * glm::exp(-t * sigma_s_scalar);
+    result.transmittance_weight = glm::exp(-t * sigma_t) * sigma_s / pdf;
 
     //
 

@@ -35,8 +35,14 @@ extern "C" __device__ PhaseFunctionEvalResult __direct_callable__henyeygreenstei
 
     PhaseFunctionEvalResult result;
     // Dummy implementation scatters uniformly into all directions.
-    result.sampling_pdf = 1/(4*glm::pi<float>());
-    result.phase_function_value = glm::vec3(1/(4*glm::pi<float>()));
+    // result.sampling_pdf = 1/(4*glm::pi<float>());
+    // result.phase_function_value = glm::vec3(1/(4*glm::pi<float>()));
+
+    float cosTheta = glm::dot(-interaction.incoming_ray_dir, outgoing_ray_dir);
+    float g = sbt_data->g;
+
+    result.sampling_pdf = 1.0f / (4.0f * glm::pi<float>()) * (1.0f - g * g) / glm::pow(1.0f + g * g - 2.0f * g * cosTheta, 1.5f);
+    result.phase_function_value = glm::vec3(result.sampling_pdf);
 
     //
 
@@ -60,6 +66,25 @@ extern "C" __device__ PhaseFunctionSamplingResult __direct_callable__henyeygreen
      * - Compute the respective sampling probability.
      */
 
+    float g = sbt_data->g;
+
+    float u1 = rng.nextFloat();
+    float u2 = rng.nextFloat();
+
+    float cosTheta = 1.0f / (2.0f * g) * (1 + g * g - glm::pow((1.0f - g * g) / (1.0f - g + 2.0f * g * u1), 2.0f));
+    float phi = u2 * glm::two_pi<float>();
+
+    float sinTheta = glm::sqrt(1.0f - cosTheta * cosTheta);
+    float x = sinTheta * glm::cos(phi);
+    float y = sinTheta * glm::sin(phi);
+    float z = cosTheta;
+
+    glm::vec3 local_dir = glm::vec3(x, y, z);
+    glm::mat3 local_frame = opg::compute_local_frame(-interaction.incoming_ray_dir);
+
+    result.outgoing_ray_dir = local_frame * local_dir;
+    result.sampling_pdf = 1.0f / (4.0f * glm::pi<float>()) * (1.0f - g * g) / glm::pow(1.0f + g * g - 2.0f * g * cosTheta, 1.5f);
+    result.phase_function_weight = glm::vec3(1.0f); // = glm::vec3(result.sampling_pdf) / glm::vec3(result.sampling_pdf);
     //
 
     return result;
