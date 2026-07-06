@@ -1,0 +1,71 @@
+<scene>
+
+    <!-- Scattering media -->
+    <!-- <component type="medium.homogeneous" name="free_space_medium"> -->
+        <!-- no absorbtion and no scattering -->
+    <!-- </component> -->
+
+
+    <component type="phase_function.henyey_greenstein" name="fog_phase">
+        <property name="g" type="float" value="0.1" />
+    </component>
+
+    <component type="grid" name="fog_grid">
+        <property name="filename" type="string" value="cube_cutout_density.npy" />
+        <property name="address_mode" type="string" value="border" />
+        <property name="filter_mode" type="string" value="nearest" />
+    </component>
+    <component type="medium.heterogeneous" name="fog_medium">
+        <property name="density_scale" type="float" value="0.2" />
+        <property name="phase_function" type="reference" value="fog_phase" />
+        <property name="grid" type="reference" value="fog_grid" />
+        <property name="to_world" type="transform">
+            <translate x="-1" y="-1" z="-1"/>
+            <scale x="2" y="2" z="2" />
+        </property>
+    </component>
+
+
+    <component type="camera" name="mycamera">
+        <property name="fov_y" type="float" value="0.5" />
+        <property name="lookat_distance" type="float" value="9.0" />
+        <property name="to_world" type="transform">
+            <rotate x="0" y="1" z="0" angle="10" />
+            <rotate x="1" y="0" z="0" angle="-20" />
+            <translate x="0" y="0" z="9.0" />
+        </property>
+    </component>
+
+    <component type="raygen.volumepathtracing">
+        <property name="camera" type="reference" value="mycamera" />
+        <!-- <property name="initial_camera_medium" type="reference" value="free_space_medium" /> -->
+    </component>
+
+    <component type="emitter.point">
+        <property name="intensity" type="float" value="60" />
+        <property name="position" type="vector" x="0" y="0" z="0" />
+    </component>
+
+    <!-- Plane shape (mesh) -->
+    <component type="shape.rectangle" name="myplane" />
+
+
+    <!-- Cube shape (mesh) -->
+    <component type="shape.cube" name="mycube" />
+
+    <!-- BSDFs -->
+    <component type="bsdf.null" name="null_bsdf" />
+
+
+    <component type="shapeinstance" >
+        <property type="transform" name="to_world">
+            <scale x="2" y="2" z="2" />
+        </property>
+        <property type="reference" name="shape" value="mycube" />
+        <property type="reference" name="bsdf" value="null_bsdf" />
+        <property type="reference" name="inside_medium" value="fog_medium" />
+        <!-- <property type="reference" name="outside_medium" value="free_space_medium" /> -->
+    </component>
+
+
+</scene>
