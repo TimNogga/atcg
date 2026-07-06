@@ -35,6 +35,21 @@ __device__ float sample_free_flight_distance_delta_tracking(const opg::Ray &ray,
      * Hint: Use the functions above to sample the medium density and sample distances in homogeneous media.
      */
 
+    float t = 0.0f;
+
+    do {
+        float u1 = rng.nextFloat();
+
+        t += warp_1d_sample_to_homogeneous_medium_event_distance(1 - u1, sbt_data->density_majorant);
+
+        if (t >= max_distance)
+            break;
+
+    } while (rng.nextFloat() > evaluate_density_grid(ray.at(t)) / sbt_data->density_majorant);
+
+    if (t < max_distance)
+        distance = t;
+
     //
 
     return distance;
@@ -44,15 +59,31 @@ __device__ float sample_free_flight_distance_delta_tracking(const opg::Ray &ray,
 
 __device__ float estimate_transmittance(const opg::Ray &ray, float max_distance, PCG32 &rng)
 {
+    const HeterogeneousMediumData *sbt_data = *reinterpret_cast<const HeterogeneousMediumData **>(optixGetSbtDataPointer());
+
     /* Implement:
      * - Evaluate the transmittance over a given distance along the ray, i.e. the transmittance between origin and origin+max_distance*direction.
      * - Implement either the delta-tracking based algorithm or ratio-tracking algorithm.
      * Hint: Use the functions above to sample the medium density and sample distances in homogeneous media.
      */
 
+    float t = 0.0f, T = 1.0f;
+
+    while (true) {
+        float u1 = rng.nextFloat();
+
+        t += warp_1d_sample_to_homogeneous_medium_event_distance(1 - u1, sbt_data->density_majorant);
+
+        if (t >= max_distance) {
+            break;
+        }
+
+        T *= 1.0f - evaluate_density_grid(ray.at(t)) / sbt_data->density_majorant;
+    }
+
     //
 
-    return 1;
+    return T;
 }
 
 extern "C" __device__ glm::vec3 __direct_callable__heterogeneousMedium_evalTransmittance(const opg::Ray &ray, float distance, PCG32 &rng)
